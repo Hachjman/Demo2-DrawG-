@@ -94,6 +94,8 @@
     second: { avatar: document.getElementById('p2Avatar'), name: document.getElementById('p2Name'), score: document.getElementById('p2Score') },
     third: { avatar: document.getElementById('p3Avatar'), name: document.getElementById('p3Name'), score: document.getElementById('p3Score') },
   };
+  // Whether this client has already guessed correctly in current round
+  let iGuessedCorrect = false;
 
   // Word selection timers
   let wordSelectInterval = null;
@@ -207,14 +209,17 @@
   });
 
   socket.on('word-hint', (data) => {
-    // Some servers may emit an empty hint before the drawer selects a word.
-    // In that case, keep placeholder underscores based on data.length.
-    const hintStr = (typeof data?.hint === 'string' && data.hint.length > 0)
-      ? data.hint.split('').join(' ')
-      : (typeof data?.length === 'number' && data.length > 0
-          ? Array(data.length).fill('_').join(' ')
-          : '_ _ _');
-    wordHint.textContent = `GUESS THIS: ${hintStr}`;
+    // If this client already guessed correctly, keep full word and ignore updates
+    if (!iGuessedCorrect) {
+      // Some servers may emit an empty hint before the drawer selects a word.
+      // In that case, keep placeholder underscores based on data.length.
+      const hintStr = (typeof data?.hint === 'string' && data.hint.length > 0)
+        ? data.hint.split('').join(' ')
+        : (typeof data?.length === 'number' && data.length > 0
+            ? Array(data.length).fill('_').join(' ')
+            : '_ _ _');
+      wordHint.textContent = `GUESS THIS: ${hintStr}`;
+    }
     const drawer = allPlayers.find(p => p.id === currentDrawerId);
     drawingStatus.textContent = `${drawer ? drawer.name : 'Someone'} is drawing...`;
     addSystemMessage(`The word has ${data.length} letters. Good luck!`);
@@ -232,6 +237,7 @@
     
     clearCanvas();
     wordHint.textContent = 'GUESS THIS: _ _ _ _ _';
+    iGuessedCorrect = false;
     
     updateRoleUI();
     updatePlayersList();
@@ -317,6 +323,15 @@
     if (player) player.score = data.score;
     updatePlayersList();
     addChatMessage('System', `🎉 ${data.playerName} guessed the word! +${data.points} points`, 'correct');
+  });
+
+  // Private reveal for the guesser who answered correctly
+  socket.on('your-correct', (data) => {
+    if (!data || !data.word) return;
+    // Do NOT change the global wordHint; show locally in chat/status only
+    iGuessedCorrect = true;
+    wordHint.textContent = `GUESS THIS: ${data.word}`;
+    addChatMessage('System', `You guessed it: "${data.word}"`, 'correct');
   });
 
   // --- UI & DRAWING LOGIC (Hầu như giữ nguyên) ---

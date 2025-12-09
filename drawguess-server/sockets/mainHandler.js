@@ -386,6 +386,9 @@ module.exports = function(gameNamespace) {
                     score: room.scores.get(socket.id),
                     isFirstGuess: (orderIndex === 0)
                 });
+
+                // Send the full word privately to the correct guesser only
+                socket.emit('your-correct', { word: room.currentWord });
             } else {
                 // Gửi thông báo riêng cho người chơi đã đoán đúng
                 socket.emit('chat-message', {
