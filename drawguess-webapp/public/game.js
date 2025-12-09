@@ -299,6 +299,15 @@
     clearCanvas();
   });
 
+  // Receive fill operations from drawer
+  socket.on('fill-area', (data) => {
+    console.log('[CLIENT] Received fill-area:', data);
+    // Only non-drawers should render remote actions
+    if (!isDrawer) {
+      fillAt(data.x, data.y, data.color);
+    }
+  });
+
   socket.on('chat-message', (data) => {
     addChatMessage(data.playerName, data.message);
   });
@@ -404,6 +413,14 @@
       console.log('[startDrawing] Not drawer, ignoring');
       return;
     }
+    // Handle bucket fill tool on click
+    if (currentTool === 'fill') {
+      const { x, y } = getCanvasCoords(e);
+      fillAt(Math.floor(x), Math.floor(y), currentColor);
+      // Notify others
+      socket.emit('fill-area', { x: Math.floor(x), y: Math.floor(y), color: currentColor });
+      return;
+    }
     isDrawing = true;
     const { x, y } = getCanvasCoords(e);
     lastX = x;
@@ -505,6 +522,94 @@
     document.querySelectorAll('.tool-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tool === currentTool);
     });
+  }
+
+  // --- Bucket Fill Implementation ---
+  function fillAt(x, y, hexColor) {
+    if (!canvas || !ctx) return;
+    const { width, height } = canvas;
+    const img = ctx.getImageData(0, 0, width, height);
+    const data = img.data;
+
+    const targetIdx = (y * width + x) * 4;
+    if (targetIdx < 0 || targetIdx >= data.length) return;
+
+    const target = [data[targetIdx], data[targetIdx + 1], data[targetIdx + 2], data[targetIdx + 3]];
+    const fill = hexToRgba(hexColor);
+
+    // If target color already equals fill color (approx), skip
+    if (colorsEqual(target, fill)) return;
+
+    const stack = [[x, y]];
+    while (stack.length) {
+      const [cx, cy] = stack.pop();
+      if (cx < 0 || cy < 0 || cx >= width || cy >= height) continue;
+      const i = (cy * width + cx) * 4;
+      if (!colorsEqual([data[i], data[i + 1], data[i + 2], data[i + 3]], target)) continue;
+
+      // Move left
+      let xl = cx;
+      while (xl >= 0) {
+        const idx = (cy * width + xl) * 4;
+        if (!colorsEqual([data[idx], data[idx + 1], data[idx + 2], data[idx + 3]], target)) break;
+        xl--;
+      }
+      xl++;
+      // Move right
+      let xr = cx;
+      while (xr < width) {
+        const idx = (cy * width + xr) * 4;
+        if (!colorsEqual([data[idx], data[idx + 1], data[idx + 2], data[idx + 3]], target)) break;
+        xr++;
+      }
+      xr--;
+
+      for (let px = xl; px <= xr; px++) {
+        const idx = (cy * width + px) * 4;
+        data[idx] = fill[0];
+        data[idx + 1] = fill[1];
+        data[idx + 2] = fill[2];
+        data[idx + 3] = 255; // opaque
+
+        // Push neighbors above and below
+        if (cy > 0) {
+          const upIdx = ((cy - 1) * width + px) * 4;
+          if (colorsEqual([data[upIdx], data[upIdx + 1], data[upIdx + 2], data[upIdx + 3]], target))
+            stack.push([px, cy - 1]);
+        }
+        if (cy < height - 1) {
+          const dnIdx = ((cy + 1) * width + px) * 4;
+          if (colorsEqual([data[dnIdx], data[dnIdx + 1], data[dnIdx + 2], data[dnIdx + 3]], target))
+            stack.push([px, cy + 1]);
+        }
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function hexToRgba(hex) {
+    const h = hex.replace('#', '');
+    const bigint = parseInt(h, 16);
+    if (h.length === 3) {
+      const r = ((bigint >> 8) & 0xF) * 17;
+      const g = ((bigint >> 4) & 0xF) * 17;
+      const b = (bigint & 0xF) * 17;
+      return [r, g, b, 255];
+    }
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return [r, g, b, 255];
+  }
+
+  function colorsEqual(a, b) {
+    // Allow small tolerance to avoid seams
+    const tol = 0;
+    return Math.abs(a[0] - b[0]) <= tol &&
+           Math.abs(a[1] - b[1]) <= tol &&
+           Math.abs(a[2] - b[2]) <= tol &&
+           Math.abs((a[3] ?? 255) - (b[3] ?? 255)) <= tol;
   }
 
   function setupChat() {

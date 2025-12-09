@@ -337,6 +337,20 @@ module.exports = function(gameNamespace) {
         socket.to(player.roomId).emit('clear-canvas');
     });
 
+    // Relay bucket fill from drawer to others
+    socket.on('fill-area', (data) => {
+        const player = players.get(socket.id);
+        if (!player) return;
+        const room = rooms.get(player.roomId);
+        if (!room) return;
+        // Only the current drawer can perform fill
+        if (socket.id !== room.currentDrawerId) return;
+        const x = Math.max(0, Math.min(Number(data?.x) || 0, 2000));
+        const y = Math.max(0, Math.min(Number(data?.y) || 0, 2000));
+        const color = typeof data?.color === 'string' ? data.color : '#000000';
+        socket.to(player.roomId).emit('fill-area', { x, y, color });
+    });
+
     socket.on('chat-message', (data) => {
         const player = players.get(socket.id);
         if (!player) return;
@@ -352,17 +366,25 @@ module.exports = function(gameNamespace) {
         if (message.toLowerCase() === room.currentWord.toLowerCase()) {
             // Kiểm tra xem người chơi đã đoán đúng trong vòng này chưa
             if (!room.correctGuessers.has(socket.id) && socket.id !== room.currentDrawerId) {
-                const points = Math.max(10, Math.floor(room.timeLeft / 5));
+                // Option A scoring
+                const orderIndex = room.correctGuessers.size; // 0-based
+                const orderBonus = orderIndex === 0 ? 20 : (orderIndex === 1 ? 10 : 0);
+                const hintsRevealed = Array.isArray(room.hintRevealedIndices) ? room.hintRevealedIndices.length : 0;
+                const hintPenalty = hintsRevealed * 5;
+                const base = 10 + Math.floor(room.timeLeft);
+                const points = Math.max(10, base + orderBonus - hintPenalty);
+
+                // Award guesser
                 const currentScore = room.scores.get(socket.id) || 0;
                 room.scores.set(socket.id, currentScore + points);
                 room.correctGuessers.add(socket.id); // Đánh dấu đã đoán đúng
 
                 gameNamespace.to(player.roomId).emit('correct-answer', {
-                    playerId: socket.id, 
-                    playerName: player.name, 
-                    points, 
+                    playerId: socket.id,
+                    playerName: player.name,
+                    points,
                     score: room.scores.get(socket.id),
-                    isFirstGuess: true
+                    isFirstGuess: (orderIndex === 0)
                 });
             } else {
                 // Gửi thông báo riêng cho người chơi đã đoán đúng
@@ -423,6 +445,8 @@ module.exports = function(gameNamespace) {
         
         // Reset danh sách người chơi đã đoán đúng
         room.correctGuessers.clear();
+        // Reset drawer reward accumulator
+        room.drawerRewardThisRound = 0;
         
         // Set drawer if not set (for new games)
         if (!room.currentDrawerId && room.players.length > 0) {

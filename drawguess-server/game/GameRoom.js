@@ -31,6 +31,7 @@ class GameRoom {
     this.wordSelectTimer = null; // timer for drawer to choose a word
     this.hintInterval = null;
     this.hintRevealedIndices = [];
+    this.drawerRewardThisRound = 0;
     this.isGameStarted = false;
     this.correctGuessers = new Set(); // Track players who guessed correctly in current round
   }
@@ -109,6 +110,7 @@ class GameRoom {
     this.stopTimer();
     this.clearWordSelectTimer();
     this.clearHintInterval();
+    this.drawerRewardThisRound = 0;
     // Reset scores but keep players in room
     this.scores = new Map(this.players.map(p => [p.id, 0]));
     // Reset round and word state
